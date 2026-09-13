@@ -1,189 +1,129 @@
-# README — Pipeline de Captions con Qwen2.5-VL
+# Captioning automatico con Qwen2.5-VL
 
-## Descripción
+La seccion **Captions** de la interfaz permite seleccionar imagenes aceptadas por el
+scraper, reunirlas en grupos, generar descripciones automaticas y revisarlas antes de
+exportarlas a un dataset de entrenamiento.
 
-La sección **Captions** del UI permite generar descripciones (captions) automáticas para las imágenes del dataset usando el modelo `Qwen/Qwen2.5-VL-7B-Instruct` con cuantización 4-bit (bitsandbytes), y revisar/editar las captions antes de enviarlas a un dataset de entrenamiento.
+## Flujo
 
----
-
-## Flujo completo
-
-```
-manual_accepted/     →   Crear grupo   →   caption_groups/<id>/
-                              ↓
-                      [Generar captions]
-                         (Qwen VL local)
-                              ↓
-                      [Revisar en UI]
-                              ↓
-                      [Mover al dataset]
-                              ↓
-                    datasets/iter_XX/images/
-                    + captions.csv + .txt por imagen
+```text
+ejecucion del scraper
+  -> imagenes aceptadas y revisadas
+  -> crear grupo de captions
+  -> generar con Qwen2.5-VL
+  -> revisar o editar en la UI
+  -> exportar al dataset
+  -> imagen PNG 512x512 + caption TXT + captions.csv
 ```
 
----
+Al crear un grupo se elige primero una de las carpetas producidas por el scraper y,
+dentro de ella, las imagenes que se quieren procesar. Esto permite trabajar con varias
+recopilaciones independientes y conservar su procedencia.
 
-## Estructura de archivos
+## Estructura de un grupo
 
-```
-caption_groups/
-  <timestamp>-<nombre>/
-    images/               ← Imágenes copiadas de manual_accepted
-    captions.csv          ← Captions revisadas (editadas en el UI)
-    captions.auto.csv     ← Captions generadas automáticamente (fuente)
-    manifest.json         ← Metadatos del grupo y estado
-    progress.json         ← Progreso de la generación (polling)
-```
-
-### `manifest.json`
-```json
-{
-  "id": "1717000000000-pixel-art-batch-01",
-  "name": "pixel art batch 01",
-  "status": "review",
-  "created_at": "2025-05-29T12:00:00.000Z",
-  "image_count": 45,
-  "moved_to": "iter_03",
-  "moved_at": "2025-05-29T14:00:00.000Z"
-}
+```text
+caption_groups/<id>/
+|-- images/
+|-- captions.auto.csv
+|-- captions.csv
+|-- manifest.json
+|-- progress.json
+|-- titles.json
+`-- generate.log
 ```
 
-**Estados del grupo:**
-| Estado         | Descripción                                      |
-|----------------|--------------------------------------------------|
-| `draft`        | Grupo creado, sin captions generadas             |
-| `generating`   | Script Python en ejecución                       |
-| `review`       | Captions disponibles para revisar/editar         |
-| `ready_to_move`| Captions marcadas como listas (reservado)        |
-| `moved`        | Imágenes copiadas al dataset de entrenamiento    |
+- `images/`: copia de las imagenes seleccionadas.
+- `captions.auto.csv`: recibe la salida de Qwen y se sincroniza al guardar ediciones.
+- `captions.csv`: version revisada que se utiliza para exportar al dataset.
+- `manifest.json`: nombre, estado, origen y destino del grupo.
+- `progress.json`: numero de imagenes procesadas y archivo actual.
+- `titles.json`: titulo, tags y otros metadatos disponibles del scraper.
+- `generate.log`: salida de la ultima ejecucion del modelo.
 
----
+Los estados principales son `draft`, `generating`, `review` y `moved`.
 
-## Uso desde el UI
+## Modelo y ejecucion
 
-### 1. Crear un grupo
-- Ve a **Captions** en el sidebar
-- Pulsa **Crear grupo**
-- Escribe un nombre y selecciona imágenes de `manual_accepted`
-- Pulsa **Crear grupo (N)**
+El script `generate_captions.py` utiliza por defecto
+`Qwen/Qwen2.5-VL-7B-Instruct`. Es un modelo multimodal: recibe conjuntamente la
+imagen y una instruccion textual, procesa ambas entradas y genera el caption como
+respuesta.
 
-Las imágenes se copian físicamente a `caption_groups/<id>/images/`.
+El modelo se ejecuta localmente en el entorno Python del proyecto. Se carga mediante
+Transformers con:
 
-### 2. Generar captions automáticos
-- Abre el grupo
-- Pulsa **Generar captions** (icono rayo ⚡)
-- Configura:
-  - **Trigger word** (por defecto: `pixelart`)
-  - **Nivel de detalle**: Corto / Medio / Detallado
-  - **Modelo**: `Qwen/Qwen2.5-VL-7B-Instruct` (solo lectura)
-  - **Modo**: Solo vacíos / Sobrescribir todos
-- Pulsa **Generar captions**
+- cuantizacion NF4 de 4 bits con bitsandbytes;
+- calculo en `bfloat16`;
+- asignacion automatica de dispositivo con `device_map="auto"`;
+- generacion determinista con `do_sample=False`;
+- limite de 200 tokens nuevos.
 
-El UI muestra una barra de progreso en tiempo real (polling cada 2 segundos).
+La cuantizacion reduce el uso de memoria respecto a cargar todos los pesos a precision
+completa. La primera ejecucion descarga el modelo desde Hugging Face si no existe en
+la cache local.
 
-### 3. Revisar y editar
-- Cada imagen muestra su caption en un textarea editable
-- **Enter** (sin Shift) guarda el caption
-- **Blur** también guarda
-- **Guardar todo** guarda todas las ediciones pendientes
+Cuando hay metadatos en `titles.json`, el titulo y las tags se anaden a la instruccion
+como pistas para interpretar la imagen. No se copian automaticamente como caption: el
+modelo sigue generando una descripcion nueva a partir de la imagen y esas referencias.
 
-### 4. Mover al dataset
-- Pulsa **Mover al dataset** (icono →)
-- Selecciona el dataset destino (`iter_01`, `iter_02`, etc.)
-- Confirma el trigger word
-- Las imágenes se copian a `datasets/<iter>/images/`
-- Se actualiza `datasets/<iter>/images/captions.csv`
-- Se generan archivos `.txt` por imagen (formato esperado por FLUX LoRA training)
+## Niveles de detalle
 
----
+| Nivel | Instruccion aplicada | Salida esperada |
+|---|---|---|
+| `short` | 8-12 palabras; trigger, sujeto y una o dos etiquetas de estilo | Etiqueta breve, sin describir fondo, color o composicion |
+| `medium` | Lista estructurada de categoria, perspectiva, sujeto, colores y rasgos | Tags separados por comas y cierre con rasgos fijos de pixel art |
+| `detailed` | Una o dos frases de 20-35 palabras | Sujeto, escenario breve y tecnicas concretas de pixel art |
 
-## Script Python
+La interfaz permite procesar solo captions vacios (`empty_only`) o regenerar todos
+los del grupo (`overwrite_all`). El resultado automatico se puede modificar y guardar
+antes de exportarlo.
 
-### Instalación de dependencias
+## Exportacion al dataset
 
-```bash
-# Activar el venv del proyecto
-venv\Scripts\Activate.ps1
+La exportacion no llama a un script externo. La funcion `moveToDataset` de
+`ui/src/server/captions.ts` realiza el proceso:
 
-# Instalar dependencias de captioning
-pip install transformers accelerate bitsandbytes qwen-vl-utils pillow
-```
+1. Lee los captions revisados del grupo.
+2. Convierte cada imagen a PNG.
+3. La redimensiona a 512x512 con Sharp y `sharp.kernel.nearest`.
+4. Mantiene la proporcion con `fit: contain` y completa el lienzo con fondo blanco.
+5. Evita colisiones de nombres mediante sufijos numericos.
+6. Actualiza `datasets/<dataset>/images/captions.csv`.
+7. Crea un `.txt` con el mismo nombre base que cada imagen.
+8. Anade el trigger word si el caption todavia no lo incluye.
 
-> **Nota:** `torch` y `torchvision` ya deben estar instalados en el venv del ai-toolkit.
+`sharp.kernel.nearest` es la implementacion de Sharp de la interpolacion
+nearest-neighbor. Ambos nombres describen el mismo criterio: cada pixel nuevo toma el
+valor del pixel original mas cercano, sin mezclar colores, lo que ayuda a conservar
+los bordes del pixel art.
 
-### Ejecución manual
+## Ejecucion manual
 
-```bash
-python scripts/tfg/generate_captions.py \
-  --images caption_groups/1717000000000-mi-grupo/images \
-  --output caption_groups/1717000000000-mi-grupo/captions.auto.csv \
-  --progress-file caption_groups/1717000000000-mi-grupo/progress.json \
-  --trigger-word pixelart \
-  --detail-level medium \
-  --model-name Qwen/Qwen2.5-VL-7B-Instruct \
+Desde la raiz del repositorio:
+
+```powershell
+.\venv\Scripts\Activate.ps1
+python scripts/tfg/generate_captions.py `
+  --images caption_groups/<id>/images `
+  --output caption_groups/<id>/captions.auto.csv `
+  --progress-file caption_groups/<id>/progress.json `
+  --titles-file caption_groups/<id>/titles.json `
+  --trigger-word pixelart `
+  --detail-level medium `
+  --model-name Qwen/Qwen2.5-VL-7B-Instruct `
   --overwrite-mode empty_only
 ```
 
-### Argumentos
+Dependencias especificas:
 
-| Argumento           | Valores posibles                         | Por defecto                        |
-|---------------------|------------------------------------------|------------------------------------|
-| `--images`          | ruta a directorio de imágenes            | (requerido)                        |
-| `--output`          | ruta al CSV de salida                    | (requerido)                        |
-| `--progress-file`   | ruta al JSON de progreso                 | (requerido)                        |
-| `--trigger-word`    | cualquier texto                          | `pixelart`                         |
-| `--detail-level`    | `short`, `medium`, `detailed`            | `medium`                           |
-| `--model-name`      | nombre del modelo HuggingFace            | `Qwen/Qwen2.5-VL-7B-Instruct`      |
-| `--overwrite-mode`  | `empty_only`, `overwrite_all`            | `empty_only`                       |
-
----
-
-## Prompts por nivel de detalle
-
-| Nivel      | Resultado esperado                                   | Tokens aprox. |
-|------------|------------------------------------------------------|---------------|
-| `short`    | Frase corta, sujeto principal                        | 10-15 palabras |
-| `medium`   | 1-2 frases, sujeto + escena + colores                | 20-40 palabras |
-| `detailed` | Descripción completa con paleta, mood, detalles      | 50-80 palabras |
-
----
-
-## Configuración del modelo
-
-Por defecto se usa `Qwen/Qwen2.5-VL-7B-Instruct` con cuantización 4-bit NF4.
-
-Para usar un modelo diferente, establece la variable de entorno antes de arrancar el UI:
-
-```bash
-$env:QWEN_CAPTION_MODEL = "Qwen/Qwen2.5-VL-3B-Instruct"
-npm run dev
+```powershell
+pip install transformers accelerate bitsandbytes qwen-vl-utils pillow
 ```
 
-### Requisitos de VRAM
-| Modelo                          | VRAM estimada (4-bit) |
-|---------------------------------|-----------------------|
-| `Qwen2.5-VL-3B-Instruct`        | ~6 GB                 |
-| `Qwen2.5-VL-7B-Instruct`        | ~10 GB                |
-| `Qwen2.5-VL-72B-Instruct`       | ~40 GB                |
+PyTorch y torchvision tambien deben estar instalados. En el uso normal, la UI busca
+primero `venv/Scripts/python.exe`, lanza el proceso en segundo plano y consulta
+`progress.json` para mostrar su avance.
 
----
-
-## Integración con el pipeline de entrenamiento
-
-Cuando se mueve un grupo a un dataset (`iter_XX`):
-1. Las imágenes se copian a `datasets/iter_XX/images/`
-2. Se actualiza `datasets/iter_XX/images/captions.csv`
-3. Se generan archivos `<nombre_imagen>.txt` con el trigger word normalizado
-
-Esto es compatible con `sync_captions.py` y con el formato esperado por el FLUX LoRA trainer.
-
----
-
-## Notas técnicas
-
-- El progreso se escribe en `progress.json` cada imagen procesada
-- Las captions se guardan incrementalmente cada 5 imágenes (protección ante fallo)
-- Si el script muere, al reiniciarlo con `--overwrite-mode empty_only` se reanudan solo las imágenes sin caption
-- El grupo guarda su historial aunque sea movido a un dataset (no se borra)
-- Colisiones de nombres al mover: se añade sufijo `_1`, `_2`, etc.
+Los grupos, datasets y modelos descargados son datos locales y no se distribuyen con
+la version publica del repositorio.

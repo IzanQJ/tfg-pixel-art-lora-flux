@@ -1,6 +1,11 @@
-# TFG - Generacion de Pixel Art mediante LoRA sobre FLUX
+# Diseño de un pipeline de entrenamiento de modelos generativos orientado a la producción de imágenes en estilo pixel-art
 
-Este repositorio contiene el desarrollo practico de mi Trabajo de Fin de Grado, centrado en un pipeline reproducible para adaptar el modelo de difusion FLUX al estilo pixel art mediante LoRA.
+Trabajo de Fin de Grado de **Izan Quiles Jiménez**. El proyecto se encuentra
+finalizado y este repositorio contiene su implementacion practica.
+
+El objetivo es ofrecer un pipeline reproducible para preparar datos, entrenar
+adaptadores LoRA sobre FLUX, generar imagenes en estilo pixel art y analizar los
+resultados obtenidos.
 
 El proyecto parte del repositorio base [`ostris/ai-toolkit`](https://github.com/ostris/ai-toolkit), sobre el que se han anadido configuraciones de entrenamiento, scripts de preparacion de datos, resultados visuales por iteracion, un scraper para construir datasets de pixel art a partir de Pixilart.com y un sistema de evaluacion automatica de las imagenes generadas. El README original del repositorio base se conserva en `README_ORIGINAL_AI_TOOLKIT.md`. Los datasets utilizados y los pesos entrenados no se distribuyen en esta version publica.
 
@@ -12,7 +17,10 @@ El objetivo practico de este TFG es construir un flujo completo de entrenamiento
 
 El modelo base utilizado es `black-forest-labs/FLUX.1-dev`, un modelo de difusion de alta calidad. Sobre el se entrena una red LoRA de rango 16 que aprende el estilo visual del pixel art a partir de un dataset curado manualmente e incrementado progresivamente con datos scrapeados.
 
-El entrenamiento se ejecuta en la nube mediante **Modal** (GPU A100-40GB) lanzado desde una **UI web** (Next.js 15) desarrollada en el TFG. Esto permite configurar, lanzar y monitorizar entrenamientos desde el navegador, sin necesidad de acceso directo a la GPU.
+Los entrenamientos pueden ejecutarse localmente o en la nube mediante **Modal**.
+La interfaz web heredada de ai-toolkit se ha adaptado y ampliado para integrar en un
+mismo flujo el scraping, el captioning, la preparacion de datasets, la configuracion y
+seguimiento de jobs, la generacion y la evaluacion de imagenes.
 
 ---
 
@@ -34,12 +42,12 @@ Construir y documentar un pipeline completo de fine-tuning mediante LoRA para ge
 
 Sobre el repositorio base `ostris/ai-toolkit` se han anadido las siguientes aportaciones:
 
-- **UI web completa** (Next.js 15, TypeScript, SQLite): interfaz para gestionar datasets, captions, entrenamientos y generacion de imagenes. Accesible en `http://localhost:3000` arrancando con `cd ui && npm run dev`.
-- **Integracion con Modal cloud GPU**: `run_modal.py` lanza entrenamientos en A100-40GB, sube el dataset y el LoRA pretrained automaticamente, y descarga los resultados al terminar. Sin necesidad de GPU local.
+- **Ampliacion de la UI de ai-toolkit** (Next.js 15, TypeScript, Prisma y SQLite): nuevas pantallas y servicios para gestionar el scraper, los captions, los datasets, las galerias, la generacion y la evaluacion.
+- **Integracion con Modal cloud GPU**: `run_modal.py` prepara y lanza entrenamientos remotos, transfiere el dataset y, si procede, el LoRA previo, y descarga los resultados al finalizar. Los entrenamientos remotos del TFG se realizaron con una A100-40GB.
 - **Pipeline de encadenamiento de LoRAs**: cada iteracion puede arrancar desde el LoRA de la anterior mediante `pretrained_lora_path`, subiendo el fichero como base64 en el payload de Modal.
 - **Configuraciones de entrenamiento por iteracion**: archivos YAML en `config/` y jobs guardados durante la ejecucion en la base de datos local `aitk_db.db`, que no se distribuye.
 - **Preparacion de datasets**: flujo para escalar imagenes a 512x512 y sincronizar captions en CSV y archivos `.txt`. Los datos utilizados en el TFG no se incluyen en el repositorio publico.
-- **Scripts auxiliares de dataset**: sincronizacion de captions (`sync_captions.py`), limpieza de huerfanos (`cleanup_orphan_txt.py`) y escalado nearest-neighbor (`scale_pixelart.py`).
+- **Scripts auxiliares de dataset**: sincronizacion de captions (`sync_captions.py`) y escalado nearest-neighbor (`scale_pixelart.py`). `cleanup_orphan_txt.py` se conserva como utilidad opcional y no forma parte del flujo normal de exportacion desde la UI.
 - **Scraper de Pixilart**: spider Scrapy completo con pipelines de descarga, filtrado, organizacion y registro de metadatos. Implementado en `scripts/scrapers/pixilart_scraper/`.
 - **Generacion automatica de captions**: `scripts/tfg/generate_captions.py` con Qwen2.5-VL-7B-Instruct (4-bit), integrado en la UI con flujo crear → generar → revisar → mover.
 - **Scripts de generacion de imagenes**: generacion interactiva, por CLI, con prompts de prueba fijos. En `scripts/tfg/`.
@@ -54,11 +62,11 @@ Los identificadores tecnicos de carpetas se conservan por compatibilidad, pero l
 
 | Iteracion | Entrenamiento | ID tecnico | Dataset | Steps | Plataforma | Estado |
 |---|---:|---|---|---:|---|---|
-| 1 | 1 | `iter_01` | `datasets/iter_01` (~20 imgs) | 500 | Local | Completado |
-| 2 | 2 | `iter_02` | `datasets/iter_02` (~14 imgs) | 500 | Local | Completado |
-| 3 | 3 | `iter_03` | `datasets/iter_03` | 1500 | Modal A100 | Completado; resultado visual no satisfactorio |
-| 3 | 4 | `iter_03_Arreglo` | `datasets/iter_03` | 500 | Modal A100 | **Completado** |
-| 3 | 5 | `iter_04` | `datasets/iter_03_captions_medios` (130 imgs) | 600 | Modal A100 | Completado |
+| 1 | 1 | `iter_01` | `datasets/iter_01` (18 imagenes, captions manuales) | 500 | Local | Completado |
+| 2 | 2 | `iter_02` | `datasets/iter_02` (14 imagenes, captions manuales) | 500 | Local | Completado |
+| 3 | 3 | `iter_03` | `datasets/iter_03` (130 imagenes, captions detallados) | 1500 | Modal A100-40GB | Completado; resultado visual no satisfactorio |
+| 3 | 4 | `iter_03_Arreglo` | `datasets/iter_03_2` (130 imagenes, captions revisados) | 500 | Modal A100-40GB | Completado; recupera el estilo buscado |
+| 3 | 5 | `iter_04` | `datasets/iter_03_captions_medios` (130 imagenes) | 600 | Modal A100-40GB | Completado; captions medios |
 
 La **Iteracion 3** incluye tambien la automatizacion del scraper, el trabajo con captions y la evaluacion tecnica de las imagenes generadas desde la UI.
 
@@ -84,6 +92,7 @@ no forman parte del repositorio publico.
 
 - Python 3.11 y un entorno virtual con las dependencias de `requirements.txt`
 - Node.js 18+ para la UI
+- PyTorch y torchvision compatibles con la version de CUDA del equipo
 - Acceso autorizado a `black-forest-labs/FLUX.1-dev` y un token de lectura de Hugging Face
 - Cuenta Modal para los entrenamientos remotos
 
@@ -93,7 +102,10 @@ no forman parte del repositorio publico.
 git submodule update --init --recursive
 python -m venv venv
 .\venv\Scripts\Activate.ps1
+# Instalar primero PyTorch/torchvision para la version de CUDA del equipo
 pip install -r requirements.txt
+pip install -r scripts/scrapers/pixilart_scraper/requirements_scraper.txt
+pip install qwen-vl-utils
 pip install modal
 cd ui
 npm install
@@ -102,13 +114,18 @@ npm run update_db
 
 El token de Hugging Face debe configurarse localmente mediante `HF_TOKEN` en un
 archivo `.env` no versionado o mediante `huggingface-cli login`. Para utilizar Modal,
-hay que instalar su cliente si no esta disponible y ejecutar `modal setup`.
+hay que autenticar su cliente y crear el secreto que consume `run_modal.py`:
+
+```powershell
+modal setup
+modal secret create huggingface-secret HF_TOKEN=<token_de_hugging_face>
+```
 
 ### Preparar un dataset
 
 Los datasets no se incluyen en el repositorio. Cada usuario debe proporcionar imagenes
 propias o con permisos de uso y seguir la estructura descrita en `datasets/README.md`.
-La interfaz permite crear un dataset y exportar hacia el sus grupos de captions ya
+La interfaz permite crear un dataset y exportar hacia el los grupos de captions ya
 revisados. Tambien se conservan los scripts de scraping y preparacion en `scripts/`.
 
 ### Activar entorno e iniciar UI
@@ -136,6 +153,10 @@ el entrenamiento se guardan localmente, pero estan excluidos de la version publi
 2. Seleccionar FLUX base o un LoRA disponible localmente.
 3. Introducir el prompt y los parametros de generacion.
 4. Generar la imagen y consultar el resultado en la galeria asociada al modelo.
+
+El selector incluye el catalogo historico del TFG y detecta tambien nuevos LoRAs
+finales almacenados bajo `outputs/`. Si no se indica una seed, el sistema genera una
+aleatoria; conservar el mismo prompt y la misma seed facilita comparar modelos.
 
 ### Evaluar una imagen generada
 
