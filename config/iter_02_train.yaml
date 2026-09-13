@@ -1,0 +1,78 @@
+---
+# Iteration-specific training config (iter_02)
+
+job: extension
+config:
+  name: "pixel_art_lora_v2"
+
+  process:
+    - type: 'sd_trainer'
+      training_folder: "outputs/iter_02"
+      performance_log_every: 100
+      device: cuda:0
+      trigger_word: "pixelart"
+
+      network:
+        type: "lora"
+        linear: 16
+        linear_alpha: 16
+        pretrained_lora_path: "outputs/iter_01/pixel_art_lora_v1/pixel_art_lora_v1.safetensors"
+
+      save:
+        dtype: float16
+        save_every: 100
+        max_step_saves_to_keep: 4
+        push_to_hub: false
+
+      datasets:
+        - folder_path: "datasets/iter_02/images"
+          caption_ext: "txt"
+          caption_dropout_rate: 0.05
+          shuffle_tokens: false
+          cache_latents_to_disk: true
+          resolution: [ 512 ]
+
+      train:
+        batch_size: 1
+        steps: 500
+        gradient_accumulation_steps: 1
+        train_unet: true
+        train_text_encoder: false
+        gradient_checkpointing: true
+        noise_scheduler: "flowmatch"
+        optimizer: "adamw8bit"
+        lr: 1e-4
+
+        ema_config:
+          use_ema: true
+          ema_decay: 0.99
+
+        dtype: bf16
+
+      model:
+        name_or_path: "black-forest-labs/FLUX.1-dev"
+        is_flux: true
+        quantize: true
+
+      sample:
+        sampler: "flowmatch"
+        sample_every: 100
+        width: 512
+        height: 512
+        prompts:
+          - "pixelart, a small knight character with sword and shield, retro game style"
+          - "pixelart, a treasure chest in a dungeon, torch lighting, stone walls"
+          - "pixelart, a forest scene with trees and a path, vibrant colors"
+          - "pixelart, a spaceship flying through asteroid field, stars background"
+          - "pixelart, a cute slime monster, green, bouncing animation frame"
+          - "pixelart, medieval castle on a hill, sunset sky, fantasy"
+        neg: ""
+        seed: 42
+        walk_seed: true
+        guidance_scale: 4
+        sample_steps: 20
+
+meta:
+  name: "[name]"
+  version: '1.0'
+  description: "iter_02 LoRA pixel-art refinement from iter_01"

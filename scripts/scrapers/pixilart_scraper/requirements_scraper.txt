@@ -1,0 +1,10 @@
+# Requirements for the Pixilart scraper
+# Install in your environment with:
+#   pip install -r requirements_scraper.txt
+#
+# Do NOT add these to the repo root requirements.txt
+# (they are only needed for the scraper, not for ai-toolkit training)
+
+scrapy>=2.11
+Pillow>=10.0
+itemadapter>=0.9

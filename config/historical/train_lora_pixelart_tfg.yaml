@@ -1,0 +1,119 @@
+---
+# =============================================================================
+# CONFIGURACIÓN DE ENTRENAMIENTO LORA PARA PIXEL-ART - TFG
+# =============================================================================
+# Autor: [Tu nombre]
+# Propósito: Fine-tuning de FLUX para generación de pixel-art
+# Hardware: RTX 5060 Ti (16GB VRAM), 32GB RAM
+# =============================================================================
+
+job: extension
+config:
+  # Nombre del modelo entrenado - aparecerá en output/
+  name: "pixel_art_lora_v1"
+  
+  process:
+    - type: 'sd_trainer'
+      
+      # Carpeta donde se guardan los checkpoints y samples
+      training_folder: "output"
+      
+      # Mostrar estadísticas de rendimiento cada N pasos (útil para documentar)
+      performance_log_every: 100
+      
+      device: cuda:0
+      
+      # Trigger word: palabra clave que activa el estilo pixel-art
+      # Se añadirá automáticamente a los captions si no existe
+      trigger_word: "pixelart"
+      
+      # -------------------------------------------------------------------------
+      # CONFIGURACIÓN DE LA RED LORA
+      # -------------------------------------------------------------------------
+      network:
+        type: "lora"
+        linear: 16          # Rank del LoRA (8-32 típico, 16 es buen balance)
+        linear_alpha: 16    # Alpha = Rank para escala 1.0
+      
+      # -------------------------------------------------------------------------
+      # CONFIGURACIÓN DE GUARDADO
+      # -------------------------------------------------------------------------
+      save:
+        dtype: float16              # Precisión para guardar el modelo
+        save_every: 100             # Guardar checkpoint cada N pasos (ajustado para 500 steps)
+        max_step_saves_to_keep: 4   # Mantener últimos 4 checkpoints intermedios
+        push_to_hub: false          # No subir a Hugging Face automáticamente
+      
+      # -------------------------------------------------------------------------
+      # DATASET DE PIXEL-ART
+      # -------------------------------------------------------------------------
+      datasets:
+        - folder_path: "datasets/pixel_art"
+          caption_ext: "txt"            # Extensión de los archivos de caption
+          caption_dropout_rate: 0.05    # 5% de dropout para robustez
+          shuffle_tokens: false         # No mezclar tokens del caption
+          cache_latents_to_disk: true   # Cachear latents (acelera entrenamiento)
+          # Resolución: 512x512 como especificaste para el TFG
+          # El pixel-art escalado debe ser 512x512
+          resolution: [ 512 ]
+      
+      # -------------------------------------------------------------------------
+      # CONFIGURACIÓN DE ENTRENAMIENTO
+      # -------------------------------------------------------------------------
+      train:
+        batch_size: 1                       # Con 16GB VRAM, batch_size=1 es seguro
+        steps: 500                          # ⚠️ REDUCIDO para 20 imágenes (evitar overfitting)
+        gradient_accumulation_steps: 1      # Acumulación de gradientes
+        train_unet: true                    # Entrenar el U-Net
+        train_text_encoder: false           # No entrenar text encoder (FLUX)
+        gradient_checkpointing: true        # Necesario para 16GB VRAM
+        noise_scheduler: "flowmatch"        # Scheduler de FLUX
+        optimizer: "adamw8bit"              # Optimizador eficiente en memoria
+        lr: 1e-4                            # Learning rate (ajustar si es necesario)
+        
+        # EMA para suavizar el aprendizaje
+        ema_config:
+          use_ema: true
+          ema_decay: 0.99
+        
+        # Precisión de entrenamiento
+        dtype: bf16
+      
+      # -------------------------------------------------------------------------
+      # MODELO BASE
+      # -------------------------------------------------------------------------
+      model:
+        name_or_path: "black-forest-labs/FLUX.1-dev"
+        is_flux: true
+        quantize: true      # Cuantización 8bit para caber en 16GB
+        # low_vram: true    # Descomentar si hay problemas de memoria
+      
+      # -------------------------------------------------------------------------
+      # GENERACIÓN DE MUESTRAS DURANTE ENTRENAMIENTO
+      # -------------------------------------------------------------------------
+      sample:
+        sampler: "flowmatch"
+        sample_every: 100       # Generar samples cada N pasos (ajustado para 500 steps)
+        width: 512
+        height: 512
+        prompts:
+          # Prompts de prueba para evaluar el entrenamiento
+          - "pixelart, a small knight character with sword and shield, retro game style"
+          - "pixelart, a treasure chest in a dungeon, torch lighting, stone walls"
+          - "pixelart, a forest scene with trees and a path, vibrant colors"
+          - "pixelart, a spaceship flying through asteroid field, stars background"
+          - "pixelart, a cute slime monster, green, bouncing animation frame"
+          - "pixelart, medieval castle on a hill, sunset sky, fantasy"
+          - "pixelart, robot character, futuristic, standing pose"
+          - "pixelart, potion bottles on wooden shelf, magical glow"
+        neg: ""  # No usado en FLUX
+        seed: 42
+        walk_seed: true
+        guidance_scale: 4
+        sample_steps: 20
+
+# Metadatos del proyecto
+meta:
+  name: "[name]"
+  version: '1.0'
+  description: "LoRA de pixel-art para TFG - Pipeline de fine-tuning"

@@ -1,0 +1,88 @@
+---
+# Iteration 03_3 — pixel art LoRA, based on iter_02 working config
+# KEY FIXES vs iter_03/iter_03_2:
+#   - bypass_guidance_embedding: false  (was true → caused training/inference mismatch)
+#   - quantize_te: false                (was true qfloat8 → degraded text embeddings)
+#   - content_or_style: balanced        (was style → ok but reverting to iter_02 baseline)
+#   - No timestep_type: sigmoid         (iter_02 didn't have it)
+
+job: extension
+config:
+  name: "pixel_art_lora_v3_Arreglo"
+
+  process:
+    - type: 'sd_trainer'
+      training_folder: "outputs/iter_03_Arreglo"
+      performance_log_every: 100
+      device: cuda:0
+      trigger_word: "pixelart"
+
+      network:
+        type: "lora"
+        linear: 16
+        linear_alpha: 16
+        # pretrained_lora_path: "outputs/iter_02/pixel_art_lora_v2/pixel_art_lora_v2.safetensors"
+
+      save:
+        dtype: float16
+        save_every: 100
+        max_step_saves_to_keep: 4
+        push_to_hub: false
+
+      datasets:
+        - folder_path: "datasets/iter_03_2/images"
+          caption_ext: "txt"
+          caption_dropout_rate: 0.05
+          shuffle_tokens: false
+          cache_latents_to_disk: true
+          resolution: [ 512 ]
+
+      train:
+        batch_size: 1
+        steps: 500
+        gradient_accumulation_steps: 1
+        train_unet: true
+        train_text_encoder: false
+        gradient_checkpointing: true
+        noise_scheduler: "flowmatch"
+        optimizer: "adamw8bit"
+        lr: 1e-4
+        # bypass_guidance_embedding is NOT set (defaults to false) — critical fix
+        # quantize_te is NOT set — only quantize the UNet/transformer
+
+        ema_config:
+          use_ema: true
+          ema_decay: 0.99
+
+        dtype: bf16
+
+      model:
+        name_or_path: "black-forest-labs/FLUX.1-dev"
+        is_flux: true
+        quantize: true
+        # quantize_te is NOT set → text encoder runs in full precision
+
+      sample:
+        sampler: "flowmatch"
+        sample_every: 100
+        width: 512
+        height: 512
+        prompts:
+          - "pixelart, a small knight character with sword and shield, retro game style"
+          - "pixelart, a treasure chest in a dungeon, torch lighting, stone walls"
+          - "pixelart, a forest scene with trees and a path, vibrant colors"
+          - "pixelart, a spaceship flying through asteroid field, stars background"
+          - "pixelart, a cute slime monster, green, bouncing animation frame"
+          - "pixelart, medieval castle on a hill, sunset sky, fantasy"
+          - "pixelart, robot character, futuristic, standing pose"
+          - "pixelart, potion bottles on wooden shelf, magical glow"
+        neg: ""
+        seed: 42
+        walk_seed: true
+        guidance_scale: 4
+        sample_steps: 20
+
+meta:
+  name: "[name]"
+  version: '1.0'
+  description: "iter_03_Arreglo — same dataset as iter_03_2 but with iter_02 training settings (no bypass_guidance, no quantize_te)"
